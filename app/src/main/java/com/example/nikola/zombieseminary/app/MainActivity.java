@@ -1,15 +1,15 @@
 package com.example.nikola.zombieseminary.app;
 
 import android.Manifest;
-import android.app.ActionBar;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Camera;
+import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Point;
+import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -18,72 +18,62 @@ import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
-import android.media.Image;
 import android.os.AsyncTask;
-import android.os.Build;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.support.annotation.NonNull;
 import android.support.constraint.ConstraintLayout;
-import android.support.design.internal.NavigationMenu;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.NavigationView;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.FragmentManager;
-import android.support.v4.app.FragmentTransaction;
 import android.support.v4.app.Fragment;
 import android.support.v4.content.ContextCompat;
-import android.support.v4.widget.DrawerLayout;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Base64;
 import android.util.JsonReader;
+import android.util.JsonToken;
 import android.util.Log;
 import android.util.Size;
-import android.view.LayoutInflater;
 import android.view.MenuItem;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
-import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
-import android.widget.Toast;
 
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.text.SimpleDateFormat;
-import java.util.Collection;
+import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Date;
 import java.util.HashMap;
-import java.util.Locale;
+import java.util.List;
 import java.util.Map;
 
 import javax.net.ssl.HttpsURLConnection;
 
 
-
 public class MainActivity extends AppCompatActivity {
 
-
+    
     /*
     * @TODO Dovršiti tutorial, dodati gumb za slikanje, spremanje fotke itd.
+    * @TODO I prednja i zadnja kamera, i rezolucije
     * Spremanje napraviti u asynctasku, na finishu prikazati sliku u fragmentu
     * U fragmentu dodati dva gumba, jedan za slanje, drugi za brisanje
     *
@@ -93,6 +83,8 @@ public class MainActivity extends AppCompatActivity {
      */
 
     private static final String TAG = "VELIKIDREK";
+
+
 
     private static final int CAMERA_REQUEST_CODE = 22;
     private CameraManager cameraManager;
@@ -115,8 +107,19 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        
 
 //        startMe();
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.INTERNET)
+                != PackageManager.PERMISSION_GRANTED) {
+            // Permission is not granted
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.INTERNET},
+                    0);
+
+        }
+
 
         textureView = findViewById(R.id.textureView);
         NavigationView nav = findViewById(R.id.nav_view);
@@ -131,8 +134,6 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
         );
-
-
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -154,6 +155,8 @@ public class MainActivity extends AppCompatActivity {
                 openCamera();
 
                 FrameLayout layout = findViewById(R.id.content_frame);
+
+                
                 float ratio = (float) previewSize.getWidth() / (float) previewSize.getHeight();
                 int newH = (int) (layout.getWidth() * ratio);
                 Log.e("Zombie", String.valueOf(newH));
@@ -203,7 +206,670 @@ public class MainActivity extends AppCompatActivity {
 
         Button btn = findViewById(R.id.button3);
 
-        class Task extends AsyncTask<Void, Void, Bitmap>{
+        class Task2 extends AsyncTask<Bitmap, Void, String>
+        {
+            private Bitmap bmp;
+
+            @Override
+            protected String doInBackground(Bitmap... bitmaps) {
+                try {
+                    // Mora biti mutable
+                    bmp = bitmaps[0].copy(Bitmap.Config.ARGB_8888, true);
+
+
+                    // stvaranje endpointa sa keyom
+                    URL mojEndpoint = new URL("https://vision.googleapis.com/v1/images:annotate?key=AIzaSyBzNFlNI_G6ROs2L1lLaQYYbg0U1sDwE2w");
+                    // otvaranje veze
+                    HttpsURLConnection myConnection =
+                            (HttpsURLConnection) mojEndpoint.openConnection();
+                    // dodavanje custom user agenta
+                    // postavi zahtjev na post
+                    myConnection.setRequestMethod("POST");
+                    myConnection.setRequestProperty("Content-Type", "application/json");
+
+
+
+                    HashMap<String, String> m = new HashMap<String, String>();
+
+
+                    JSONObject source1 = new JSONObject();
+/*
+
+                    source1.put("imageUri", "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png");
+                    JSONObject image1 = new JSONObject();
+                    image1.put("source", source1);
+
+
+                    JSONObject image2 = new JSONObject();
+                    image2.put("image", image1);
+*/
+                    ByteArrayOutputStream stream = new ByteArrayOutputStream();
+                    bmp.compress(Bitmap.CompressFormat.JPEG, 100, stream);
+                    byte[] bytes = stream.toByteArray();
+
+                    String con = Base64.encodeToString(bytes, Base64.DEFAULT);
+
+
+                    JSONObject imageCon = new JSONObject();
+                    imageCon.put("content", con);
+
+                    JSONObject image2 = new JSONObject();
+                    image2.put("image", imageCon);
+
+                    JSONArray arF = new JSONArray();
+                    JSONObject arFF = new JSONObject();
+
+                    arFF.put("type", "OBJECT_LOCALIZATION");
+                    //arFF.put("maxResults", 1);
+                    arF.put(arFF);
+
+
+                    image2.put("features", arF);
+
+                    JSONArray ar = new JSONArray();
+
+                    ar.put(image2);
+
+
+                    Log.d("Zombie", ar.getString(0));
+                    JSONObject req = new JSONObject();
+
+                    req.put("requests", ar);
+
+                    Log.d("Zombie", req.toString());
+
+/*
+                    int maxLogSize = 1000;
+                    for(int i = 0; i <= req.toString().length() / maxLogSize; i++) {
+                        int start = i * maxLogSize;
+                        int end = (i+1) * maxLogSize;
+                        end = end > req.toString().length() ? req.toString().length() : end;
+                        Log.v("Zombie", req.toString().substring(start, end));
+                    }
+*/
+                   //  DA NE TROŠIMO PODATKE HEHE
+                    // Enable writing
+                    myConnection.setDoOutput(true);
+
+
+                   // myConnection.getOutputStream().write(myData.getBytes());
+                    OutputStreamWriter myWrt = new OutputStreamWriter(myConnection.getOutputStream());
+
+                    myWrt.write(req.toString());
+                    myWrt.flush();
+                    myWrt.close();
+
+
+                    Log.d("Zombie ",String.valueOf(myConnection.getResponseCode()));
+                    Log.d("Zombie ",String.valueOf(myConnection.getResponseMessage()));
+
+                    InputStream is = myConnection.getInputStream();
+                    InputStreamReader isr = new InputStreamReader(is);
+
+                    String jsonString ="";
+
+                    int cc = isr.read();
+
+                    while(cc != -1){
+                        char theChar = (char) cc;
+                        cc = isr.read();
+                        jsonString += theChar;
+                    }
+                    Log.d("Zombie", jsonString);
+                    isr.close();
+
+
+                    myConnection.disconnect();
+
+/*
+                    String jsonString = "" +
+                            "{ \"responses\": [\n" +
+                            "        {\n" +
+                            "          \"localizedObjectAnnotations\": [\n" +
+                            "            {\n" +
+                            "              \"mid\": \"/m/0k4j\",\n" +
+                            "              \"name\": \"Car\",\n" +
+                            "              \"score\": 0.73251706,\n" +
+                            "              \"boundingPoly\": {\n" +
+                            "                \"normalizedVertices\": [\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.73255426,\n" +
+                            "                    \"y\": 0.7711425\n" +
+                            "                  },\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.88020134,\n" +
+                            "                    \"y\": 0.7711425\n" +
+                            "                  },\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.88020134,\n" +
+                            "                    \"y\": 0.88584834\n" +
+                            "                  },\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.73255426,\n" +
+                            "                    \"y\": 0.88584834\n" +
+                            "                  }\n" +
+                            "                ]\n" +
+                            "              }\n" +
+                            "            },\n" +
+                            "            {\n" +
+                            "              \"mid\": \"/m/0k4j\",\n" +
+                            "              \"name\": \"Car\",\n" +
+                            "              \"score\": 0.66700697,\n" +
+                            "              \"boundingPoly\": {\n" +
+                            "                \"normalizedVertices\": [\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.5958359,\n" +
+                            "                    \"y\": 0.7551425\n" +
+                            "                  },\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.71148294,\n" +
+                            "                    \"y\": 0.7551425\n" +
+                            "                  },\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.71148294,\n" +
+                            "                    \"y\": 0.8627895\n" +
+                            "                  },\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.5958359,\n" +
+                            "                    \"y\": 0.8627895\n" +
+                            "                  }\n" +
+                            "                ]\n" +
+                            "              }\n" +
+                            "            }\n" +
+                            "          ]\n" +
+                            "        }\n" +
+                            "      ]\n" +
+                            "    }";
+/*
+                    String jsonString = "{\n" +
+                            "  \"responses\": [\n" +
+                            "    {\n" +
+                            "      \"localizedObjectAnnotations\": [\n" +
+                            "        {\n" +
+                            "          \"mid\": \"/m/01bqk0\",\n" +
+                            "          \"name\": \"Bicycle wheel\",\n" +
+                            "          \"score\": 0.89648587,\n" +
+                            "          \"boundingPoly\": {\n" +
+                            "            \"normalizedVertices\": [\n" +
+                            "              {\n" +
+                            "                \"x\": 0.32076266,\n" +
+                            "                \"y\": 0.78941387\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.43812272,\n" +
+                            "                \"y\": 0.78941387\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.43812272,\n" +
+                            "                \"y\": 0.97331065\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.32076266,\n" +
+                            "                \"y\": 0.97331065\n" +
+                            "              }\n" +
+                            "            ]\n" +
+                            "          }\n" +
+                            "        },\n" +
+                            "        {\n" +
+                            "          \"mid\": \"/m/0199g\",\n" +
+                            "          \"name\": \"Bicycle\",\n" +
+                            "          \"score\": 0.886761,\n" +
+                            "          \"boundingPoly\": {\n" +
+                            "            \"normalizedVertices\": [\n" +
+                            "              {\n" +
+                            "                \"x\": 0.312,\n" +
+                            "                \"y\": 0.6616471\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.638353,\n" +
+                            "                \"y\": 0.6616471\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.638353,\n" +
+                            "                \"y\": 0.9705882\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.312,\n" +
+                            "                \"y\": 0.9705882\n" +
+                            "              }\n" +
+                            "            ]\n" +
+                            "          }\n" +
+                            "        },\n" +
+                            "        {\n" +
+                            "          \"mid\": \"/m/01bqk0\",\n" +
+                            "          \"name\": \"Bicycle wheel\",\n" +
+                            "          \"score\": 0.6345275,\n" +
+                            "          \"boundingPoly\": {\n" +
+                            "            \"normalizedVertices\": [\n" +
+                            "              {\n" +
+                            "                \"x\": 0.5125398,\n" +
+                            "                \"y\": 0.760708\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.6256646,\n" +
+                            "                \"y\": 0.760708\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.6256646,\n" +
+                            "                \"y\": 0.94601655\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.5125398,\n" +
+                            "                \"y\": 0.94601655\n" +
+                            "              }\n" +
+                            "            ]\n" +
+                            "          }\n" +
+                            "        },\n" +
+                            "        {\n" +
+                            "          \"mid\": \"/m/06z37_\",\n" +
+                            "          \"name\": \"Picture frame\",\n" +
+                            "          \"score\": 0.6207608,\n" +
+                            "          \"boundingPoly\": {\n" +
+                            "            \"normalizedVertices\": [\n" +
+                            "              {\n" +
+                            "                \"x\": 0.79177403,\n" +
+                            "                \"y\": 0.16160682\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.97047985,\n" +
+                            "                \"y\": 0.16160682\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.97047985,\n" +
+                            "                \"y\": 0.31348917\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.79177403,\n" +
+                            "                \"y\": 0.31348917\n" +
+                            "              }\n" +
+                            "            ]\n" +
+                            "          }\n" +
+                            "        },\n" +
+                            "        {\n" +
+                            "          \"mid\": \"/m/0h9mv\",\n" +
+                            "          \"name\": \"Tire\",\n" +
+                            "          \"score\": 0.55886006,\n" +
+                            "          \"boundingPoly\": {\n" +
+                            "            \"normalizedVertices\": [\n" +
+                            "              {\n" +
+                            "                \"x\": 0.32076266,\n" +
+                            "                \"y\": 0.78941387\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.43812272,\n" +
+                            "                \"y\": 0.78941387\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.43812272,\n" +
+                            "                \"y\": 0.97331065\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.32076266,\n" +
+                            "                \"y\": 0.97331065\n" +
+                            "              }\n" +
+                            "            ]\n" +
+                            "          }\n" +
+                            "        },\n" +
+                            "        {\n" +
+                            "          \"mid\": \"/m/02dgv\",\n" +
+                            "          \"name\": \"Door\",\n" +
+                            "          \"score\": 0.5160098,\n" +
+                            "          \"boundingPoly\": {\n" +
+                            "            \"normalizedVertices\": [\n" +
+                            "              {\n" +
+                            "                \"x\": 0.77569866,\n" +
+                            "                \"y\": 0.37104446\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.9412425,\n" +
+                            "                \"y\": 0.37104446\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.9412425,\n" +
+                            "                \"y\": 0.81507325\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.77569866,\n" +
+                            "                \"y\": 0.81507325\n" +
+                            "              }\n" +
+                            "            ]\n" +
+                            "          }\n" +
+                            "        }\n" +
+                            "      ]\n" +
+                            "    }\n" +
+                            "  ]\n" +
+                            "}";
+
+                    */
+                    byte[] s = Base64.decode(con,Base64.DEFAULT);
+                    BitmapFactory.Options opt = new BitmapFactory.Options();
+                    opt.inMutable=true;
+                    Bitmap bit = BitmapFactory.decodeByteArray(s, 0, s.length, opt);
+
+
+
+                    try {
+                        MainActivity.this.cameraCaptureSession.setRepeatingRequest(cameraRequest, null, backgroundHandler);
+                    } catch (CameraAccessException e) {
+                        e.printStackTrace();
+                    }
+
+                    return jsonString;
+
+                } catch (MalformedURLException e) {
+                    e.printStackTrace();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                }
+
+
+                return null;
+            }
+
+            @Override
+            protected void onPostExecute(String jsonResponse) {
+                super.onPostExecute(jsonResponse);
+
+                myCanvas c = new myCanvas(getApplicationContext());
+
+                Canvas c1 = new Canvas(bmp);
+
+                /*
+                *
+                *
+                *
+                *
+                *       PARSIRANJE TimE
+                *
+                *
+                *
+                */
+
+
+                InputStream inputStream = new ByteArrayInputStream(jsonResponse.getBytes());
+
+                InputStreamReader reader = new InputStreamReader(inputStream);
+
+                JsonReader jR = new JsonReader(reader);
+
+                List<PicObject> l = null;
+
+                try {
+                    l = PicObject(jR);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+
+
+                Paint p = new Paint();
+                p.setTextSize(20.0f);
+                p.setColor(Color.BLUE);
+                p.setStrokeWidth(5.0f);
+                p.setStyle(Paint.Style.STROKE);
+
+
+                // Start pozicije imageView-a
+
+                ImageView moje = findViewById(R.id.imageView);
+                moje.setImageBitmap(bmp);
+
+
+/*
+                                             \"x\": 0.73255426,\n" +
+                        "                    \"y\": 0.7711425\n" +
+                        "                  },\n" +
+                        "                  {\n" +
+                        "                    \"x\": 0.88020134,\n" +
+                        "                    \"y\": 0.7711425\n" +
+                        "                  },\n" +
+                        "                  {\n" +
+                        "                    \"x\": 0.88020134,\n" +
+                        "                    \"y\": 0.88584834\n" +
+                        "                  },\n" +
+                        "                  {\n" +
+                        "                    \"x\": 0.73255426,\n" +
+                        "                    \"y\": 0.88584834\n" +
+*/
+/*
+                float yT = 0.7551425f * bmp.getHeight();
+                float yB = 0.8627895f * bmp.getHeight();
+                float xL = 0.5958359f * bmp.getWidth();
+                float xR = 0.71148294f * bmp.getWidth();
+                */
+                Log.e("Zombie", "x" + c1.getWidth());
+                Log.e("Zombie", "y" + c1.getHeight());
+
+               // Rect r = new Rect(((int) xL), ((int) yT), ((int) xR), ((int) yB));
+
+
+                List<Rect> board = new ArrayList<>();
+
+                if(l != null){
+                    for(PicObject obj: l){
+                        double yT = obj.getLoc().get("yT") * bmp.getHeight();
+                        double yB = obj.getLoc().get("yB") * bmp.getHeight();
+                        double xL = obj.getLoc().get("xL") * bmp.getWidth();
+                        double xR = obj.getLoc().get("xR") * bmp.getWidth();
+
+                        board.add(new Rect(((int) xL), ((int) yT),((int) xR),((int) yB)));
+                    }
+                }
+
+                if(board != null){
+                    for(Rect r: board){
+                        c1.drawRect(r, p);
+                    }
+                }
+
+               // c1.drawRect(r, p);
+                //c.draw(c1);
+                //c.setR(r);
+                //c.setBmp(bitmap);
+                Log.e("Zombie", "Tusam");
+
+               // ConstraintLayout lay = findViewById(R.id.con_layout);
+
+                //lay.addView(c, 1);
+
+
+
+            }
+
+            class PicObject{
+                private String mid;
+                private String name;
+                private double score;
+                private Map<String, Double> loc;
+
+
+                PicObject(String mid, String name, double score, Map<String, Double> map){
+                    this.mid = mid;
+                    this.name = name;
+                    this.score = score;
+                    this.loc = map;
+                }
+
+                public String getMid() {
+                    return mid;
+                }
+
+                public String getName() {
+                    return name;
+                }
+
+                public double getScore() {
+                    return score;
+                }
+
+                public Map<String, Double> getLoc() {
+                    return loc;
+                }
+            }
+
+            private List<PicObject> PicObject(JsonReader jR) throws IOException {
+                // Glavna funkcija za parsiranje JSON-a
+
+                List<PicObject> list = new ArrayList<>();
+
+                jR.beginObject();
+                jR.nextName();
+
+                jR.beginArray();
+                jR.beginObject();
+                jR.nextName();
+
+
+                jR.beginArray();
+
+                while(jR.peek() == JsonToken.BEGIN_OBJECT){
+                    list.add(parseObject(jR));
+                }
+
+                jR.endArray();
+                jR.endObject();
+                jR.endArray();
+                jR.endObject();
+
+                Log.e("Zombie", jR.peek().toString());
+
+                return list;
+
+            }
+
+            private Map<String, Double> parseKor(JsonReader jR) throws IOException{
+
+                String node = "";
+
+                double xL = 0.0f;
+                double xR = 0.0f;
+                double yT = 0.0f;
+                double yB = 0.0f;
+
+                jR.beginObject();
+
+                while(jR.hasNext()){
+                    node = jR.nextName();
+
+                    if(node.equals("normalizedVertices")){
+                        jR.beginArray();
+
+                        jR.beginObject();
+                        jR.nextName();
+                        xL = jR.nextDouble();
+                        jR.nextName();
+                        yT = jR.nextDouble();
+                        jR.endObject();
+
+                        jR.beginObject();
+                        jR.nextName();
+                        jR.skipValue();
+                        jR.nextName();
+                        jR.skipValue();
+                        jR.endObject();
+
+                        jR.beginObject();
+                        jR.nextName();
+                        xR = jR.nextDouble();
+                        jR.nextName();
+                        yB = jR.nextDouble();
+                        jR.endObject();
+
+                        jR.beginObject();
+                        jR.nextName();
+                        jR.skipValue();
+                        jR.nextName();
+                        jR.skipValue();
+                        jR.endObject();
+
+                        jR.endArray();
+
+                    }
+                }
+                jR.endObject();
+
+                Map<String, Double> map = new HashMap<String, Double>();
+
+                map.put("xL", xL);
+                map.put("xR", xR);
+                map.put("yT", yT);
+                map.put("yB", yB);
+
+                return map;
+            }
+
+            private PicObject parseObject(JsonReader jR) throws IOException {
+
+                String mid = "";
+                String name = "";
+                double score = 0.0f;
+                float pos_x = 0.0f;
+                float pos_y = 0.0f;
+
+                Map<String, Double> map = new HashMap<String, Double>();
+
+                String node = "";
+
+                jR.beginObject();
+
+                while(jR.hasNext()){
+                    node = jR.nextName();
+
+                    if(node.equals("mid")) mid = jR.nextString();
+                    else if(node.equals("name")) name = jR.nextString();
+                    else if(node.equals("score")) score = jR.nextDouble();
+                    else if(node.equals("boundingPoly")){
+                        // Array koordinata
+                        map = parseKor(jR);
+                    }
+                }
+                jR.endObject();
+
+                // TODO Return objekt - treba kretirati
+
+                return new PicObject(mid, name, score, map);
+
+            }
+
+            class myCanvas extends View{
+
+                private Rect r = null;
+
+                private Paint p;
+
+                private Bitmap bmp;
+
+                public myCanvas(Context context) {
+                    super(context);
+                    this.p = new Paint();
+                    p.setTextSize(20.0f);
+                    p.setColor(Color.BLUE);
+                    p.setStrokeWidth(5.0f);
+                    p.setStyle(Paint.Style.STROKE);
+                    this.setBackgroundColor(Color.RED);
+
+                }
+
+                @Override
+                protected void onDraw(Canvas canvas) {
+                    super.onDraw(canvas);
+                    if(r!=null){
+                        canvas.drawRect(r, p);
+                    }
+                }
+
+                public void setR(Rect r) {
+                    this.r = r;
+                }
+
+                public void setBmp(Bitmap bmp) {
+                    this.bmp = bmp;
+                }
+            }
+        }
+
+        class Task extends AsyncTask<Void, Void, byte[]> {
 
             @Override
             protected void onPreExecute() {
@@ -214,30 +880,72 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
-            protected Bitmap doInBackground(Void... voids) {
+            protected byte[] doInBackground(Void... voids) {
 
                 Bitmap bitmap = textureView.getBitmap();
-               /* ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream);
-                byte[] bytes = outputStream.toByteArray();
-                String encoded = Base64.encodeToString(bytes, Base64.DEFAULT);*/
 
 
-                return bitmap;
+                // BITMAP
+
+                Bitmap bmp = BitmapFactory.decodeResource(getResources(), R.drawable.test2);
+
+                Bitmap bmp2 = Bitmap.createScaledBitmap(bmp, bmp.getWidth()/4, bmp.getHeight()/4, false);
+
+                ByteArrayOutputStream bt = new ByteArrayOutputStream();
+
+
+
+                bmp2.compress(Bitmap.CompressFormat.JPEG, 100, bt);
+
+                byte[] bajtovi = bt.toByteArray();
+
+                Log.e("S1", String.valueOf(bmp.getByteCount()));
+                Log.e("S2", String.valueOf(bmp2.getByteCount()));
+
+                return bajtovi;
             }
 
             @Override
-            protected void onPostExecute(Bitmap bitmap) {
-                super.onPostExecute(bitmap);
+            protected void onPostExecute(byte[] bajtovi) {
+                super.onPostExecute(bajtovi);
+
+                Bitmap bitmap = BitmapFactory.decodeByteArray(bajtovi,0, bajtovi.length);
+
                 ImageView imageView = findViewById(R.id.imageView);
                 imageView.setImageBitmap(bitmap);
+
+
+                String enc = Base64.encodeToString(bajtovi, Base64.DEFAULT);
+
+
+
                 ConstraintLayout layout = findViewById(R.id.con_layout);
                 FloatingActionButton button1 = findViewById(R.id.floatingActionButton);
                 FloatingActionButton button2 = findViewById(R.id.floatingActionButton2);
+
                 ProgressBar progressBar = findViewById(R.id.progressBar);
                 progressBar.setVisibility(View.GONE);
+
+
+
                 button1.show();
+
+                button1.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        //startMe(enc);
+
+                        Task2 t1 = new Task2();
+                        t1.execute(bitmap);
+
+
+                    }
+                });
+
+                // TODO funkcija za slanje fotke
+
                 button2.show();
+
 
                 button2.setOnClickListener(new View.OnClickListener() {
                     @Override
@@ -252,6 +960,7 @@ public class MainActivity extends AppCompatActivity {
 
             }
         }
+       
 
 
         btn.setOnClickListener(new View.OnClickListener() {
@@ -294,7 +1003,7 @@ public class MainActivity extends AppCompatActivity {
 
 */
                 /*
-
+                                                                 
                 fragment = new BlankFragment();
                 fragmentManager = getSupportFragmentManager();
                 FragmentTransaction fragmentTransaction = fragmentManager.beginTransaction();
@@ -329,23 +1038,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
     }
-
-    private void createImageGallery() {
-        File storageDirectory = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
-        galleryFolder = new File(storageDirectory, getResources().getString(R.string.app_name));
-        if (!galleryFolder.exists()) {
-            boolean wasCreated = galleryFolder.mkdirs();
-            if (!wasCreated) {
-                Log.e("CapturedImages", "Failed to create directory");
-            }
-        }
-    }
-
-    private File createImageFile(File galleryFolder) throws IOException {
-        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
-        String imageFileName = "image_" + timeStamp + "_";
-        return File.createTempFile(imageFileName, ".jpg", galleryFolder);
-    }
+    
 
     @Override
     public void onBackPressed() {
@@ -513,6 +1206,15 @@ public class MainActivity extends AppCompatActivity {
     void startMe(String con){
         AsyncTask.execute(new Runnable() {
 
+            /*
+            *
+            *
+            *
+            *
+            *
+            *
+            */
+
             @Override
             public void run() {
                 try {
@@ -525,6 +1227,9 @@ public class MainActivity extends AppCompatActivity {
                     // postavi zahtjev na post
                     myConnection.setRequestMethod("POST");
                     myConnection.setRequestProperty("Content-Type", "application/json");
+
+
+
                     HashMap<String, String> m = new HashMap<String, String>();
 
 
@@ -610,18 +1315,305 @@ public class MainActivity extends AppCompatActivity {
 
 
                     myConnection.disconnect();
+*/
+                    /*
+                    String jsonString = "" +
+                            "{ \"responses\": [\n" +
+                            "        {\n" +
+                            "          \"localizedObjectAnnotations\": [\n" +
+                            "            {\n" +
+                            "              \"mid\": \"/m/0k4j\",\n" +
+                            "              \"name\": \"Car\",\n" +
+                            "              \"score\": 0.73251706,\n" +
+                            "              \"boundingPoly\": {\n" +
+                            "                \"normalizedVertices\": [\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.73255426,\n" +
+                            "                    \"y\": 0.7711425\n" +
+                            "                  },\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.88020134,\n" +
+                            "                    \"y\": 0.7711425\n" +
+                            "                  },\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.88020134,\n" +
+                            "                    \"y\": 0.88584834\n" +
+                            "                  },\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.73255426,\n" +
+                            "                    \"y\": 0.88584834\n" +
+                            "                  }\n" +
+                            "                ]\n" +
+                            "              }\n" +
+                            "            },\n" +
+                            "            {\n" +
+                            "              \"mid\": \"/m/0k4j\",\n" +
+                            "              \"name\": \"Car\",\n" +
+                            "              \"score\": 0.66700697,\n" +
+                            "              \"boundingPoly\": {\n" +
+                            "                \"normalizedVertices\": [\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.5958359,\n" +
+                            "                    \"y\": 0.7551425\n" +
+                            "                  },\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.71148294,\n" +
+                            "                    \"y\": 0.7551425\n" +
+                            "                  },\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.71148294,\n" +
+                            "                    \"y\": 0.8627895\n" +
+                            "                  },\n" +
+                            "                  {\n" +
+                            "                    \"x\": 0.5958359,\n" +
+                            "                    \"y\": 0.8627895\n" +
+                            "                  }\n" +
+                            "                ]\n" +
+                            "              }\n" +
+                            "            }\n" +
+                            "          ]\n" +
+                            "        }\n" +
+                            "      ]\n" +
+                            "    }";
+*/
+
+
+                    String jsonString = "{\n" +
+                            "  \"responses\": [\n" +
+                            "    {\n" +
+                            "      \"localizedObjectAnnotations\": [\n" +
+                            "        {\n" +
+                            "          \"mid\": \"/m/01bqk0\",\n" +
+                            "          \"name\": \"Bicycle wheel\",\n" +
+                            "          \"score\": 0.89648587,\n" +
+                            "          \"boundingPoly\": {\n" +
+                            "            \"normalizedVertices\": [\n" +
+                            "              {\n" +
+                            "                \"x\": 0.32076266,\n" +
+                            "                \"y\": 0.78941387\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.43812272,\n" +
+                            "                \"y\": 0.78941387\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.43812272,\n" +
+                            "                \"y\": 0.97331065\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.32076266,\n" +
+                            "                \"y\": 0.97331065\n" +
+                            "              }\n" +
+                            "            ]\n" +
+                            "          }\n" +
+                            "        },\n" +
+                            "        {\n" +
+                            "          \"mid\": \"/m/0199g\",\n" +
+                            "          \"name\": \"Bicycle\",\n" +
+                            "          \"score\": 0.886761,\n" +
+                            "          \"boundingPoly\": {\n" +
+                            "            \"normalizedVertices\": [\n" +
+                            "              {\n" +
+                            "                \"x\": 0.312,\n" +
+                            "                \"y\": 0.6616471\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.638353,\n" +
+                            "                \"y\": 0.6616471\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.638353,\n" +
+                            "                \"y\": 0.9705882\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.312,\n" +
+                            "                \"y\": 0.9705882\n" +
+                            "              }\n" +
+                            "            ]\n" +
+                            "          }\n" +
+                            "        },\n" +
+                            "        {\n" +
+                            "          \"mid\": \"/m/01bqk0\",\n" +
+                            "          \"name\": \"Bicycle wheel\",\n" +
+                            "          \"score\": 0.6345275,\n" +
+                            "          \"boundingPoly\": {\n" +
+                            "            \"normalizedVertices\": [\n" +
+                            "              {\n" +
+                            "                \"x\": 0.5125398,\n" +
+                            "                \"y\": 0.760708\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.6256646,\n" +
+                            "                \"y\": 0.760708\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.6256646,\n" +
+                            "                \"y\": 0.94601655\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.5125398,\n" +
+                            "                \"y\": 0.94601655\n" +
+                            "              }\n" +
+                            "            ]\n" +
+                            "          }\n" +
+                            "        },\n" +
+                            "        {\n" +
+                            "          \"mid\": \"/m/06z37_\",\n" +
+                            "          \"name\": \"Picture frame\",\n" +
+                            "          \"score\": 0.6207608,\n" +
+                            "          \"boundingPoly\": {\n" +
+                            "            \"normalizedVertices\": [\n" +
+                            "              {\n" +
+                            "                \"x\": 0.79177403,\n" +
+                            "                \"y\": 0.16160682\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.97047985,\n" +
+                            "                \"y\": 0.16160682\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.97047985,\n" +
+                            "                \"y\": 0.31348917\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.79177403,\n" +
+                            "                \"y\": 0.31348917\n" +
+                            "              }\n" +
+                            "            ]\n" +
+                            "          }\n" +
+                            "        },\n" +
+                            "        {\n" +
+                            "          \"mid\": \"/m/0h9mv\",\n" +
+                            "          \"name\": \"Tire\",\n" +
+                            "          \"score\": 0.55886006,\n" +
+                            "          \"boundingPoly\": {\n" +
+                            "            \"normalizedVertices\": [\n" +
+                            "              {\n" +
+                            "                \"x\": 0.32076266,\n" +
+                            "                \"y\": 0.78941387\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.43812272,\n" +
+                            "                \"y\": 0.78941387\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.43812272,\n" +
+                            "                \"y\": 0.97331065\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.32076266,\n" +
+                            "                \"y\": 0.97331065\n" +
+                            "              }\n" +
+                            "            ]\n" +
+                            "          }\n" +
+                            "        },\n" +
+                            "        {\n" +
+                            "          \"mid\": \"/m/02dgv\",\n" +
+                            "          \"name\": \"Door\",\n" +
+                            "          \"score\": 0.5160098,\n" +
+                            "          \"boundingPoly\": {\n" +
+                            "            \"normalizedVertices\": [\n" +
+                            "              {\n" +
+                            "                \"x\": 0.77569866,\n" +
+                            "                \"y\": 0.37104446\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.9412425,\n" +
+                            "                \"y\": 0.37104446\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.9412425,\n" +
+                            "                \"y\": 0.81507325\n" +
+                            "              },\n" +
+                            "              {\n" +
+                            "                \"x\": 0.77569866,\n" +
+                            "                \"y\": 0.81507325\n" +
+                            "              }\n" +
+                            "            ]\n" +
+                            "          }\n" +
+                            "        }\n" +
+                            "      ]\n" +
+                            "    }\n" +
+                            "  ]\n" +
+                            "}";
+
+                    byte[] s = Base64.decode(con,Base64.DEFAULT);
+                    BitmapFactory.Options opt = new BitmapFactory.Options();
+                    opt.inMutable=true;
+                    Bitmap bit = BitmapFactory.decodeByteArray(s, 0, s.length, opt);
+
+                    myCanvas c = new myCanvas(getApplicationContext());
+
+                    Canvas c1 = new Canvas(bit);
+                    Paint p = new Paint();
+                    p.setTextSize(20.0f);
+                    p.setColor(Color.BLUE);
+                    c1.drawText("Aaaa",100,100,p);
+                    c.draw(c1);
+
+                    Log.e("Zombie", "Tusam");
+
+                    ConstraintLayout lay = findViewById(R.id.con_layout);
+
+
+                    lay.addView(c);
+
+
+
+
                     try {
                         MainActivity.this.cameraCaptureSession.setRepeatingRequest(cameraRequest, null, backgroundHandler);
                     } catch (CameraAccessException e) {
                         e.printStackTrace();
                     }
-*/
+
                 } catch (MalformedURLException e) {
                     e.printStackTrace();
                 } catch (IOException e) {
                     e.printStackTrace();
                 } catch (JSONException e) {
                     e.printStackTrace();
+                }
+            }
+
+            class myCanvas extends View{
+
+                public myCanvas(Context context) {
+                    super(context);
+                }
+
+                @Override
+                protected void onDraw(Canvas canvas) {
+                    super.onDraw(canvas);
+                }
+            }
+
+            class User{
+                private String name;
+                private float score;
+                private Rect rect;
+
+                User(String name, float score, Rect r){
+                    this.name = name;
+                    this.score = score;
+                    this.rect = r;
+                }
+
+
+                public String getName() {
+                    return name;
+                }
+
+                public Rect getRect() {
+                    return rect;
+                }
+
+                public void setRect(Rect rect) {
+                    this.rect = rect;
+                }
+
+                public float getScore() {
+                    return score;
                 }
             }
         });
