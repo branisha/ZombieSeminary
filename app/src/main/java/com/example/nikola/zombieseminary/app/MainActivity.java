@@ -8,6 +8,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LightingColorFilter;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
@@ -18,17 +19,22 @@ import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.provider.MediaStore;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.constraint.ConstraintLayout;
+import android.support.constraint.ConstraintSet;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.NavigationView;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.FragmentManager;
 import android.support.v4.app.Fragment;
 import android.support.v4.content.ContextCompat;
+import android.support.v4.widget.DrawerLayout;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Base64;
@@ -36,6 +42,7 @@ import android.util.JsonReader;
 import android.util.JsonToken;
 import android.util.Log;
 import android.util.Size;
+import android.view.Menu;
 import android.view.MenuItem;
 import android.view.Surface;
 import android.view.TextureView;
@@ -58,11 +65,13 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.MalformedURLException;
+import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.ListIterator;
 import java.util.Map;
 
 import javax.net.ssl.HttpsURLConnection;
@@ -84,7 +93,7 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "VELIKIDREK";
 
-
+    private static final int PICK_IMAGE = 50;
 
     private static final int CAMERA_REQUEST_CODE = 22;
     private CameraManager cameraManager;
@@ -100,6 +109,7 @@ public class MainActivity extends AppCompatActivity {
     private CaptureRequest.Builder captureRequestBuilder;
     private CaptureRequest cameraRequest;
     private CameraCaptureSession cameraCaptureSession;
+    private StreamConfigurationMap streamConfigurationMap;
     private FragmentManager fragmentManager;
     private File galleryFolder;
 
@@ -120,9 +130,26 @@ public class MainActivity extends AppCompatActivity {
 
         }
 
+        Button buttonGallery = findViewById(R.id.buttonGallery);
+
+        buttonGallery.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent intent = new Intent();
+                intent.setType("image/*");
+                intent.setAction(Intent.ACTION_GET_CONTENT);
+                startActivityForResult(Intent.createChooser(intent, "Select Picture"), PICK_IMAGE);
+            }
+
+
+        });
+
+
 
         textureView = findViewById(R.id.textureView);
         NavigationView nav = findViewById(R.id.nav_view);
+        DrawerLayout drawer =  findViewById(R.id.drawer_layout);
+
 
         nav.setNavigationItemSelectedListener(
                 new NavigationView.OnNavigationItemSelectedListener() {
@@ -130,10 +157,17 @@ public class MainActivity extends AppCompatActivity {
                     public boolean onNavigationItemSelected(@NonNull MenuItem menuItem) {
                         menuItem.setChecked(true);
 
+
+                        changeCamDimen(menuItem.getItemId());
+
+                        drawer.closeDrawers();
+
+
                         return false;
                     }
                 }
         );
+
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -154,8 +188,9 @@ public class MainActivity extends AppCompatActivity {
                 setUpCamera();
                 openCamera();
 
-                FrameLayout layout = findViewById(R.id.content_frame);
+                ConstraintLayout layout = findViewById(R.id.ConLay);
 
+                Log.e("Zombie1", previewSize.toString());
                 
                 float ratio = (float) previewSize.getWidth() / (float) previewSize.getHeight();
                 int newH = (int) (layout.getWidth() * ratio);
@@ -163,8 +198,28 @@ public class MainActivity extends AppCompatActivity {
                 if(newH > layout.getHeight()){
                     newH = layout.getHeight();
                 }
-                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(layout.getWidth(), newH);
+
+
+
+                ConstraintLayout.LayoutParams params = new ConstraintLayout.LayoutParams(layout.getWidth(), newH);
+
                 textureView.setLayoutParams(params);
+
+                ConstraintSet constraintSet = new ConstraintSet();
+                constraintSet.clone(layout);
+                constraintSet.connect(R.id.textureView,ConstraintSet.TOP,R.id.ConLay,ConstraintSet.TOP,0);
+                constraintSet.connect(R.id.textureView,ConstraintSet.BOTTOM,R.id.ConLay,ConstraintSet.BOTTOM,0);
+                constraintSet.applyTo(layout);
+
+                Menu m = nav.getMenu();
+
+                for(int i = 0; i < streamConfigurationMap.getOutputSizes(SurfaceTexture.class).length; i++){
+                    String name = streamConfigurationMap.getOutputSizes(SurfaceTexture.class)[i].toString();
+                    m.add(R.id.group_res, i, 0, name).setCheckable(true);
+                }
+                m.getItem(0).setChecked(true);
+
+
             }
 
             @Override
@@ -204,35 +259,144 @@ public class MainActivity extends AppCompatActivity {
             }
         };
 
+
+
         Button btn = findViewById(R.id.button3);
 
-        class Task2 extends AsyncTask<Bitmap, Void, String>
-        {
-            private Bitmap bmp;
-
+        btn.setOnClickListener(new View.OnClickListener() {
             @Override
-            protected String doInBackground(Bitmap... bitmaps) {
+            public void onClick(View v) {
+                /*
+                Bitmap bitmap = textureView.getBitmap();
+                ByteArrayOutputStream stream = new ByteArrayOutputStream();
+                bitmap.compress(Bitmap.CompressFormat.PNG, 80, stream);
+                byte[] bytes = stream.toByteArray();
+                String encoded = Base64.encodeToString(bytes, Base64.DEFAULT);
+
                 try {
-                    // Mora biti mutable
-                    bmp = bitmaps[0].copy(Bitmap.Config.ARGB_8888, true);
+                    cameraCaptureSession.stopRepeating();
+                    //cameraCaptureSession.capture(captureRequestBuilder.build(), null, backgroundHandler);
+                } catch (CameraAccessException e) {
+                    e.printStackTrace();
+                }*/
+
+               /* Bitmap bitmap = textureView.getBitmap();
+                ByteArrayOutputStream stream = new ByteArrayOutputStream();
+                bitmap.compress(Bitmap.CompressFormat.PNG, 80, stream);
+                byte[] bytes = stream.toByteArray();
+                String encoded = Base64.encodeToString(bytes, Base64.DEFAULT);
+/*
+                ImageView temp_img = new ImageView(MainActivity.this);
+                temp_img.setImageBitmap( bitmap);
 
 
-                    // stvaranje endpointa sa keyom
-                    URL mojEndpoint = new URL("https://vision.googleapis.com/v1/images:annotate?key=AIzaSyBzNFlNI_G6ROs2L1lLaQYYbg0U1sDwE2w");
-                    // otvaranje veze
-                    HttpsURLConnection myConnection =
-                            (HttpsURLConnection) mojEndpoint.openConnection();
-                    // dodavanje custom user agenta
-                    // postavi zahtjev na post
-                    myConnection.setRequestMethod("POST");
-                    myConnection.setRequestProperty("Content-Type", "application/json");
+                FrameLayout relativeLayout = (FrameLayout) findViewById(R.id.content_frame);
+                FrameLayout.LayoutParams layoutParams = new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+
+                );
+
+
+                relativeLayout.addView(temp_img, layoutParams);
+
+
+*/
+                /*
+                                                                 
+                fragment = new BlankFragment();
+                fragmentManager = getSupportFragmentManager();
+                FragmentTransaction fragmentTransaction = fragmentManager.beginTransaction();
+
+                fragmentTransaction.add(R.id.content_frame, fragment).commit();
+*/
+
+                Task tt = new Task();
+                tt.execute();
+
+/*
+                ImageView imageView = new ImageView(v.getContext());
+
+                imageView.setScaleType(ImageView.ScaleType.FIT_XY);
+                imageView.setBackgroundColor(Color.argb(255,200,200,200));
+                imageView.setAdjustViewBounds(true);
+                imageView.setImageResource(R.drawable.wakeupcat);
+
+
+                FrameLayout layout = findViewById(R.id.content_frame);
+                layout.addView(imageView);
+
+                for(int index=0; index<((ViewGroup)layout).getChildCount(); ++index) {
+                    View nextChild = ((ViewGroup)layout).getChildAt(index);
+                    if(nextChild instanceof ImageView){
+                        layout.removeView(nextChild);
+                        break;
+                    }
+                }*/
+                //startMe(encoded)
+            }
+        });
+
+
+    }
+
+
+    private void changeCamDimen(int index){
+
+        previewSize = streamConfigurationMap.getOutputSizes(SurfaceTexture.class)[index];
+
+        ConstraintLayout layout = findViewById(R.id.ConLay);
+
+        Log.e("Zombie1", previewSize.toString());
+
+        float ratio = (float) previewSize.getWidth() / (float) previewSize.getHeight();
+        int newH = (int) (layout.getWidth() * ratio);
+        Log.e("Zombie", String.valueOf(newH));
+        if(newH > layout.getHeight()){
+            newH = layout.getHeight();
+        }
+
+        ConstraintLayout.LayoutParams params = new ConstraintLayout.LayoutParams(layout.getWidth(), newH);
+
+        textureView.setLayoutParams(params);
+
+        ConstraintSet constraintSet = new ConstraintSet();
+        constraintSet.clone(layout);
+        constraintSet.connect(R.id.textureView,ConstraintSet.TOP,R.id.ConLay,ConstraintSet.TOP,0);
+        constraintSet.connect(R.id.textureView,ConstraintSet.BOTTOM,R.id.ConLay,ConstraintSet.BOTTOM,0);
+        constraintSet.applyTo(layout);
+
+        openCamera();
+
+    }
+
+    class Task2 extends AsyncTask<Bitmap, Void, String>
+    {
+        private Bitmap bmp;
+
+        @Override
+        protected String doInBackground(Bitmap... bitmaps) {
+            try {
+                // Mora biti mutable
+                bmp = bitmaps[0].copy(Bitmap.Config.ARGB_8888, true);
+
+
+                // stvaranje endpointa sa keyom
+                URL mojEndpoint = new URL("https://vision.googleapis.com/v1/images:annotate?key=AIzaSyBzNFlNI_G6ROs2L1lLaQYYbg0U1sDwE2w");
+                // otvaranje veze
+                HttpsURLConnection myConnection =
+                        (HttpsURLConnection) mojEndpoint.openConnection();
+                // dodavanje custom user agenta
+                // postavi zahtjev na post
+                myConnection.setRequestMethod("POST");
+                myConnection.setRequestProperty("Content-Type", "application/json");
 
 
 
-                    HashMap<String, String> m = new HashMap<String, String>();
+                HashMap<String, String> m = new HashMap<String, String>();
 
 
-                    JSONObject source1 = new JSONObject();
+                JSONObject source1 = new JSONObject();
 /*
 
                     source1.put("imageUri", "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png");
@@ -243,40 +407,45 @@ public class MainActivity extends AppCompatActivity {
                     JSONObject image2 = new JSONObject();
                     image2.put("image", image1);
 */
-                    ByteArrayOutputStream stream = new ByteArrayOutputStream();
-                    bmp.compress(Bitmap.CompressFormat.JPEG, 100, stream);
-                    byte[] bytes = stream.toByteArray();
+                ByteArrayOutputStream stream = new ByteArrayOutputStream();
+                bmp.compress(Bitmap.CompressFormat.JPEG, 100, stream);
+                byte[] bytes = stream.toByteArray();
 
-                    String con = Base64.encodeToString(bytes, Base64.DEFAULT);
-
-
-                    JSONObject imageCon = new JSONObject();
-                    imageCon.put("content", con);
-
-                    JSONObject image2 = new JSONObject();
-                    image2.put("image", imageCon);
-
-                    JSONArray arF = new JSONArray();
-                    JSONObject arFF = new JSONObject();
-
-                    arFF.put("type", "OBJECT_LOCALIZATION");
-                    //arFF.put("maxResults", 1);
-                    arF.put(arFF);
+                String con = Base64.encodeToString(bytes, Base64.DEFAULT);
 
 
-                    image2.put("features", arF);
+                JSONObject imageCon = new JSONObject();
+                imageCon.put("content", con);
 
-                    JSONArray ar = new JSONArray();
+                JSONObject image2 = new JSONObject();
+                image2.put("image", imageCon);
 
-                    ar.put(image2);
+                JSONArray arF = new JSONArray();
+                JSONObject arFF = new JSONObject();
+
+                // arFF.put("type", "OBJECT_LOCALIZATION");
+                // To je za traženje multiple objekta
+                arFF.put("type", "LABEL_DETECTION");
 
 
-                    Log.d("Zombie", ar.getString(0));
-                    JSONObject req = new JSONObject();
 
-                    req.put("requests", ar);
+                //arFF.put("maxResults", 1);
+                arF.put(arFF);
 
-                    Log.d("Zombie", req.toString());
+
+                image2.put("features", arF);
+
+                JSONArray ar = new JSONArray();
+
+                ar.put(image2);
+
+
+                Log.d("Zombie", ar.getString(0));
+                JSONObject req = new JSONObject();
+
+                req.put("requests", ar);
+
+                Log.d("Zombie", req.toString());
 
 /*
                     int maxLogSize = 1000;
@@ -287,39 +456,39 @@ public class MainActivity extends AppCompatActivity {
                         Log.v("Zombie", req.toString().substring(start, end));
                     }
 */
-                   //  DA NE TROŠIMO PODATKE HEHE
-                    // Enable writing
-                    myConnection.setDoOutput(true);
+                //  DA NE TROŠIMO PODATKE HEHE
+                // Enable writing
+                myConnection.setDoOutput(true);
 
 
-                   // myConnection.getOutputStream().write(myData.getBytes());
-                    OutputStreamWriter myWrt = new OutputStreamWriter(myConnection.getOutputStream());
+                // myConnection.getOutputStream().write(myData.getBytes());
+                OutputStreamWriter myWrt = new OutputStreamWriter(myConnection.getOutputStream());
 
-                    myWrt.write(req.toString());
-                    myWrt.flush();
-                    myWrt.close();
-
-
-                    Log.d("Zombie ",String.valueOf(myConnection.getResponseCode()));
-                    Log.d("Zombie ",String.valueOf(myConnection.getResponseMessage()));
-
-                    InputStream is = myConnection.getInputStream();
-                    InputStreamReader isr = new InputStreamReader(is);
-
-                    String jsonString ="";
-
-                    int cc = isr.read();
-
-                    while(cc != -1){
-                        char theChar = (char) cc;
-                        cc = isr.read();
-                        jsonString += theChar;
-                    }
-                    Log.d("Zombie", jsonString);
-                    isr.close();
+                myWrt.write(req.toString());
+                myWrt.flush();
+                myWrt.close();
 
 
-                    myConnection.disconnect();
+                Log.d("Zombie ",String.valueOf(myConnection.getResponseCode()));
+                Log.d("Zombie ",String.valueOf(myConnection.getResponseMessage()));
+
+                InputStream is = myConnection.getInputStream();
+                InputStreamReader isr = new InputStreamReader(is);
+
+                String jsonString ="";
+
+                int cc = isr.read();
+
+                while(cc != -1){
+                    char theChar = (char) cc;
+                    cc = isr.read();
+                    jsonString += theChar;
+                }
+                Log.d("ZombieString", jsonString);
+                isr.close();
+
+
+                myConnection.disconnect();
 
 /*
                     String jsonString = "" +
@@ -541,59 +710,86 @@ public class MainActivity extends AppCompatActivity {
                             "}";
 
                     */
-                    byte[] s = Base64.decode(con,Base64.DEFAULT);
-                    BitmapFactory.Options opt = new BitmapFactory.Options();
-                    opt.inMutable=true;
-                    Bitmap bit = BitmapFactory.decodeByteArray(s, 0, s.length, opt);
+                byte[] s = Base64.decode(con,Base64.DEFAULT);
+                BitmapFactory.Options opt = new BitmapFactory.Options();
+                opt.inMutable=true;
+                Bitmap bit = BitmapFactory.decodeByteArray(s, 0, s.length, opt);
 
 
 
-                    try {
-                        MainActivity.this.cameraCaptureSession.setRepeatingRequest(cameraRequest, null, backgroundHandler);
-                    } catch (CameraAccessException e) {
-                        e.printStackTrace();
-                    }
-
-                    return jsonString;
-
-                } catch (MalformedURLException e) {
-                    e.printStackTrace();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                } catch (JSONException e) {
+                try {
+                    MainActivity.this.cameraCaptureSession.setRepeatingRequest(cameraRequest, null, backgroundHandler);
+                } catch (CameraAccessException e) {
                     e.printStackTrace();
                 }
 
+                return jsonString;
 
-                return null;
+            } catch (MalformedURLException e) {
+                e.printStackTrace();
+            } catch (IOException e) {
+                e.printStackTrace();
+            } catch (JSONException e) {
+                e.printStackTrace();
             }
 
-            @Override
-            protected void onPostExecute(String jsonResponse) {
-                super.onPostExecute(jsonResponse);
 
-                myCanvas c = new myCanvas(getApplicationContext());
+            return null;
+        }
 
-                Canvas c1 = new Canvas(bmp);
+        @Override
+        protected void onPostExecute(String jsonResponse) {
+            super.onPostExecute(jsonResponse);
 
-                /*
-                *
-                *
-                *
-                *
-                *       PARSIRANJE TimE
-                *
-                *
-                *
-                */
+            myCanvas c = new myCanvas(getApplicationContext());
+
+            Canvas c1 = new Canvas(bmp);
+
+            /*
+             *
+             *
+             *
+             *
+             *       PARSIRANJE TimE
+             *
+             *
+             *
+             */
+//
+//                jsonResponse = " {\n" +
+//                            "      \"responses\": [\n" +
+//                            "        {\n" +
+//                            "          \"labelAnnotations\": [\n" +
+//                            "            {\n" +
+//                            "              \"mid\": \"/m/02psyd2\",\n" +
+//                            "              \"description\": \"zombie\",\n" +
+//                            "              \"score\": 0.9018883,\n" +
+//                            "              \"topicality\": 0.9018883\n" +
+//                            "            },\n" +
+//                            "            {\n" +
+//                            "              \"mid\": \"/m/02h7lkt\",\n" +
+//                            "              \"description\": \"fictional character\",\n" +
+//                            "              \"score\": 0.5292452,\n" +
+//                            "              \"topicality\": 0.5292452\n" +
+//                            "            },\n" +
+//                            "            {\n" +
+//                            "              \"mid\": \"/m/03qtwd\",\n" +
+//                            "              \"description\": \"crowd\",\n" +
+//                            "              \"score\": 0.51949716,\n" +
+//                            "              \"topicality\": 0.51949716\n" +
+//                            "            }\n" +
+//                            "          ]\n" +
+//                            "        }\n" +
+//                            "      ]\n" +
+//                            "    }\n";
 
 
-                InputStream inputStream = new ByteArrayInputStream(jsonResponse.getBytes());
+            InputStream inputStream = new ByteArrayInputStream(jsonResponse.getBytes());
 
-                InputStreamReader reader = new InputStreamReader(inputStream);
+            InputStreamReader reader = new InputStreamReader(inputStream);
 
-                JsonReader jR = new JsonReader(reader);
-
+            JsonReader jR = new JsonReader(reader);
+            /*
                 List<PicObject> l = null;
 
                 try {
@@ -601,19 +797,55 @@ public class MainActivity extends AppCompatActivity {
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
+*/
+            List<Labela> l = new ArrayList<>();
+
+            try {
+                l = parseLabelaArray(jR);
+                jR.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
 
 
-                Paint p = new Paint();
-                p.setTextSize(20.0f);
-                p.setColor(Color.BLUE);
-                p.setStrokeWidth(5.0f);
-                p.setStyle(Paint.Style.STROKE);
+
+            Paint p = new Paint();
+            p.setTextSize(50.0f);
+            p.setColor(Color.WHITE);
+            p.setStrokeWidth(5.0f);
+            LightingColorFilter filter;
+
+            int screenColor = Color.GREEN;
 
 
-                // Start pozicije imageView-a
+            String[] okuzen = {"blood", "mythical creature", "fictional character", "zombie"};
 
-                ImageView moje = findViewById(R.id.imageView);
-                moje.setImageBitmap(bmp);
+            for(int i = 0; i < l.size(); i++){
+                c1.drawText(l.get(i).desc, 50,  50 * i, p);
+                for(String s: okuzen){
+                    if(l.get(i).desc.equals(s)){
+                        screenColor = Color.RED;
+                    }
+                }
+            }
+            filter = new LightingColorFilter(screenColor, 1);
+
+            p.setColorFilter(filter);
+
+
+            ImageView moje = findViewById(R.id.imageView);
+
+
+            c1 = new Canvas(bmp);
+
+            c1.drawBitmap(bmp,0,0, p);
+
+            moje.setImageBitmap(bmp);
+
+
+            Log.e("Zombie", "x" + c1.getWidth());
+            Log.e("Zombie", "y" + c1.getHeight());
+
 
 
 /*
@@ -629,7 +861,7 @@ public class MainActivity extends AppCompatActivity {
                         "                    \"y\": 0.88584834\n" +
                         "                  },\n" +
                         "                  {\n" +
-                        "                    \"x\": 0.73255426,\n" +
+                        "                    \"x\": 0.7325F5426,\n" +
                         "                    \"y\": 0.88584834\n" +
 */
 /*
@@ -638,14 +870,11 @@ public class MainActivity extends AppCompatActivity {
                 float xL = 0.5958359f * bmp.getWidth();
                 float xR = 0.71148294f * bmp.getWidth();
                 */
-                Log.e("Zombie", "x" + c1.getWidth());
-                Log.e("Zombie", "y" + c1.getHeight());
-
-               // Rect r = new Rect(((int) xL), ((int) yT), ((int) xR), ((int) yB));
 
 
-                List<Rect> board = new ArrayList<>();
+            // Rect r = new Rect(((int) xL), ((int) yT), ((int) xR), ((int) yB));
 
+            /*
                 if(l != null){
                     for(PicObject obj: l){
                         double yT = obj.getLoc().get("yT") * bmp.getHeight();
@@ -672,373 +901,460 @@ public class MainActivity extends AppCompatActivity {
                // ConstraintLayout lay = findViewById(R.id.con_layout);
 
                 //lay.addView(c, 1);
+*/
 
 
+        }
 
+        class Labela{
+            private String mid;
+            private String desc;
+            private double score;
+            private double topic;
+
+            Labela(String mid, String desc, double score, double topic){
+                this.mid = mid;
+                this.desc = desc;
+                this.score = score;
+                this.topic = topic;
             }
 
-            class PicObject{
-                private String mid;
-                private String name;
-                private double score;
-                private Map<String, Double> loc;
-
-
-                PicObject(String mid, String name, double score, Map<String, Double> map){
-                    this.mid = mid;
-                    this.name = name;
-                    this.score = score;
-                    this.loc = map;
-                }
-
-                public String getMid() {
-                    return mid;
-                }
-
-                public String getName() {
-                    return name;
-                }
-
-                public double getScore() {
-                    return score;
-                }
-
-                public Map<String, Double> getLoc() {
-                    return loc;
-                }
+            public String getMid() {
+                return mid;
             }
 
-            private List<PicObject> PicObject(JsonReader jR) throws IOException {
-                // Glavna funkcija za parsiranje JSON-a
-
-                List<PicObject> list = new ArrayList<>();
-
-                jR.beginObject();
-                jR.nextName();
-
-                jR.beginArray();
-                jR.beginObject();
-                jR.nextName();
-
-
-                jR.beginArray();
-
-                while(jR.peek() == JsonToken.BEGIN_OBJECT){
-                    list.add(parseObject(jR));
-                }
-
-                jR.endArray();
-                jR.endObject();
-                jR.endArray();
-                jR.endObject();
-
-                Log.e("Zombie", jR.peek().toString());
-
-                return list;
-
+            public String getDesc() {
+                return desc;
             }
 
-            private Map<String, Double> parseKor(JsonReader jR) throws IOException{
-
-                String node = "";
-
-                double xL = 0.0f;
-                double xR = 0.0f;
-                double yT = 0.0f;
-                double yB = 0.0f;
-
-                jR.beginObject();
-
-                while(jR.hasNext()){
-                    node = jR.nextName();
-
-                    if(node.equals("normalizedVertices")){
-                        jR.beginArray();
-
-                        jR.beginObject();
-                        jR.nextName();
-                        xL = jR.nextDouble();
-                        jR.nextName();
-                        yT = jR.nextDouble();
-                        jR.endObject();
-
-                        jR.beginObject();
-                        jR.nextName();
-                        jR.skipValue();
-                        jR.nextName();
-                        jR.skipValue();
-                        jR.endObject();
-
-                        jR.beginObject();
-                        jR.nextName();
-                        xR = jR.nextDouble();
-                        jR.nextName();
-                        yB = jR.nextDouble();
-                        jR.endObject();
-
-                        jR.beginObject();
-                        jR.nextName();
-                        jR.skipValue();
-                        jR.nextName();
-                        jR.skipValue();
-                        jR.endObject();
-
-                        jR.endArray();
-
-                    }
-                }
-                jR.endObject();
-
-                Map<String, Double> map = new HashMap<String, Double>();
-
-                map.put("xL", xL);
-                map.put("xR", xR);
-                map.put("yT", yT);
-                map.put("yB", yB);
-
-                return map;
+            public double getScore() {
+                return score;
             }
 
-            private PicObject parseObject(JsonReader jR) throws IOException {
-
-                String mid = "";
-                String name = "";
-                double score = 0.0f;
-                float pos_x = 0.0f;
-                float pos_y = 0.0f;
-
-                Map<String, Double> map = new HashMap<String, Double>();
-
-                String node = "";
-
-                jR.beginObject();
-
-                while(jR.hasNext()){
-                    node = jR.nextName();
-
-                    if(node.equals("mid")) mid = jR.nextString();
-                    else if(node.equals("name")) name = jR.nextString();
-                    else if(node.equals("score")) score = jR.nextDouble();
-                    else if(node.equals("boundingPoly")){
-                        // Array koordinata
-                        map = parseKor(jR);
-                    }
-                }
-                jR.endObject();
-
-                // TODO Return objekt - treba kretirati
-
-                return new PicObject(mid, name, score, map);
-
-            }
-
-            class myCanvas extends View{
-
-                private Rect r = null;
-
-                private Paint p;
-
-                private Bitmap bmp;
-
-                public myCanvas(Context context) {
-                    super(context);
-                    this.p = new Paint();
-                    p.setTextSize(20.0f);
-                    p.setColor(Color.BLUE);
-                    p.setStrokeWidth(5.0f);
-                    p.setStyle(Paint.Style.STROKE);
-                    this.setBackgroundColor(Color.RED);
-
-                }
-
-                @Override
-                protected void onDraw(Canvas canvas) {
-                    super.onDraw(canvas);
-                    if(r!=null){
-                        canvas.drawRect(r, p);
-                    }
-                }
-
-                public void setR(Rect r) {
-                    this.r = r;
-                }
-
-                public void setBmp(Bitmap bmp) {
-                    this.bmp = bmp;
-                }
+            public double getTopic() {
+                return topic;
             }
         }
 
-        class Task extends AsyncTask<Void, Void, byte[]> {
+        private Labela parseLabela(JsonReader jr) throws IOException {
 
-            @Override
-            protected void onPreExecute() {
-                super.onPreExecute();
-                ConstraintLayout constraintLayout = findViewById(R.id.con_layout);
-                constraintLayout.setVisibility(View.VISIBLE);
-                constraintLayout.setBackgroundColor(Color.argb(255,200,200,200));
-            }
-
-            @Override
-            protected byte[] doInBackground(Void... voids) {
-
-                Bitmap bitmap = textureView.getBitmap();
-
-
-                // BITMAP
-
-                Bitmap bmp = BitmapFactory.decodeResource(getResources(), R.drawable.test2);
-
-                Bitmap bmp2 = Bitmap.createScaledBitmap(bmp, bmp.getWidth()/4, bmp.getHeight()/4, false);
-
-                ByteArrayOutputStream bt = new ByteArrayOutputStream();
-
-
-
-                bmp2.compress(Bitmap.CompressFormat.JPEG, 100, bt);
-
-                byte[] bajtovi = bt.toByteArray();
-
-                Log.e("S1", String.valueOf(bmp.getByteCount()));
-                Log.e("S2", String.valueOf(bmp2.getByteCount()));
-
-                return bajtovi;
-            }
-
-            @Override
-            protected void onPostExecute(byte[] bajtovi) {
-                super.onPostExecute(bajtovi);
-
-                Bitmap bitmap = BitmapFactory.decodeByteArray(bajtovi,0, bajtovi.length);
-
-                ImageView imageView = findViewById(R.id.imageView);
-                imageView.setImageBitmap(bitmap);
-
-
-                String enc = Base64.encodeToString(bajtovi, Base64.DEFAULT);
-
-
-
-                ConstraintLayout layout = findViewById(R.id.con_layout);
-                FloatingActionButton button1 = findViewById(R.id.floatingActionButton);
-                FloatingActionButton button2 = findViewById(R.id.floatingActionButton2);
-
-                ProgressBar progressBar = findViewById(R.id.progressBar);
-                progressBar.setVisibility(View.GONE);
-
-
-
-                button1.show();
-
-                button1.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        //startMe(enc);
-
-                        Task2 t1 = new Task2();
-                        t1.execute(bitmap);
-
-
-                    }
-                });
-
-                // TODO funkcija za slanje fotke
-
-                button2.show();
-
-
-                button2.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        button1.hide();
-                        button2.hide();
-                        progressBar.setVisibility(View.VISIBLE);
-                        layout.setVisibility(View.GONE);
-                        imageView.setImageBitmap(null);
-                    }
-                });
-
-            }
-        }
-       
-
-
-        btn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
                 /*
-                Bitmap bitmap = textureView.getBitmap();
-                ByteArrayOutputStream stream = new ByteArrayOutputStream();
-                bitmap.compress(Bitmap.CompressFormat.PNG, 80, stream);
-                byte[] bytes = stream.toByteArray();
-                String encoded = Base64.encodeToString(bytes, Base64.DEFAULT);
+                {
+                  "mid": "/m/02psyd2",
+                  "description": "zombie",
+                    "score": 0.9018883,
+                    "topicality": 0.9018883
+                 },
+                */
+
+            String node = "";
+
+            String mid = "";
+            String desc = "";
+            double score = 0f;
+            double topicality = 0f;
+
+
+            jr.beginObject();
+
+            while(jr.hasNext()){
+                node = jr.nextName();
+
+                if(node.equals("mid")) mid = jr.nextString();
+                else if(node.equals("description")) desc = jr.nextString();
+                else if(node.equals("score")) score = jr.nextDouble();
+                else if(node.equals("topicality")) jr.nextDouble();
+                else jr.skipValue();
+            }
+
+            jr.endObject();
+
+            return new Labela(mid, desc, score, topicality);
+
+        }
+
+        private List<Labela> parseLabelaArray(JsonReader jr) throws IOException {
+
+                /*
+                [
+            {
+              "mid": "/m/02psyd2",
+              "description": "zombie",
+              "score": 0.9018883,
+              "topicality": 0.9018883
+            },
+            {
+              "mid": "/m/02h7lkt",
+              "description": "fictional character",
+              "score": 0.5292452,
+              "topicality": 0.5292452
+            },
+            {
+              "mid": "/m/03qtwd",
+              "description": "crowd",
+              "score": 0.51949716,
+              "topicality": 0.51949716
+            }
+          ]
+                 */
+            List<Labela> l = new ArrayList<>();
+
+            jr.beginObject();
+            jr.nextName(); // responses
+            jr.beginArray();
+            jr.beginObject();
+
+
+            // Ako je JSON response prazan
+            if(jr.peek() == JsonToken.END_OBJECT) return l;
+
+            jr.nextName(); // labelAnnotations
+
+
+            jr.beginArray();
+
+            while(jr.peek() == JsonToken.BEGIN_OBJECT){
+                l.add(parseLabela(jr));
+
+            }
+
+            jr.endArray();
+
+
+            jr.endObject();
+            jr.endArray();
+            jr.endObject();
+
+
+            return l;
+
+        }
+
+        class PicObject{
+
+            private String mid;
+            private String name;
+            private double score;
+            private Map<String, Double> loc;
+
+            PicObject(String mid, String name, double score, Map<String, Double> map){
+
+                this.mid = mid;
+                this.name = name;
+                this.score = score;
+                this.loc = map;
+
+            }
+
+            public String getMid() {
+                return mid;
+            }
+
+            public String getName() {
+                return name;
+            }
+
+            public double getScore() {
+                return score;
+            }
+
+            public Map<String, Double> getLoc() {
+                return loc;
+            }
+        }
+
+
+
+        private List<PicObject> PicObject(JsonReader jR) throws IOException {
+            // Glavna funkcija za parsiranje JSON-a
+
+            List<PicObject> list = new ArrayList<>();
+
+            jR.beginObject();
+            jR.nextName();
+
+            jR.beginArray();
+            jR.beginObject();
+            jR.nextName();
+
+
+            jR.beginArray();
+
+            while(jR.peek() == JsonToken.BEGIN_OBJECT){
+                list.add(parseObject(jR));
+            }
+
+            jR.endArray();
+            jR.endObject();
+            jR.endArray();
+            jR.endObject();
+
+            Log.e("Zombie", jR.peek().toString());
+
+            return list;
+
+        }
+
+        private Map<String, Double> parseKor(JsonReader jR) throws IOException{
+
+            String node = "";
+
+            double xL = 0.0f;
+            double xR = 0.0f;
+            double yT = 0.0f;
+            double yB = 0.0f;
+
+            jR.beginObject();
+
+            while(jR.hasNext()){
+                node = jR.nextName();
+
+                if(node.equals("normalizedVertices")){
+                    jR.beginArray();
+
+                    jR.beginObject();
+                    jR.nextName();
+                    xL = jR.nextDouble();
+                    jR.nextName();
+                    yT = jR.nextDouble();
+                    jR.endObject();
+
+                    jR.beginObject();
+                    jR.nextName();
+                    jR.skipValue();
+                    jR.nextName();
+                    jR.skipValue();
+                    jR.endObject();
+
+                    jR.beginObject();
+                    jR.nextName();
+                    xR = jR.nextDouble();
+                    jR.nextName();
+                    yB = jR.nextDouble();
+                    jR.endObject();
+
+                    jR.beginObject();
+                    jR.nextName();
+                    jR.skipValue();
+                    jR.nextName();
+                    jR.skipValue();
+                    jR.endObject();
+
+                    jR.endArray();
+
+                }
+            }
+            jR.endObject();
+
+            Map<String, Double> map = new HashMap<String, Double>();
+
+            map.put("xL", xL);
+            map.put("xR", xR);
+            map.put("yT", yT);
+            map.put("yB", yB);
+
+            return map;
+        }
+
+        private PicObject parseObject(JsonReader jR) throws IOException {
+
+            String mid = "";
+            String name = "";
+            double score = 0.0f;
+            float pos_x = 0.0f;
+            float pos_y = 0.0f;
+
+            Map<String, Double> map = new HashMap<String, Double>();
+
+            String node = "";
+
+            jR.beginObject();
+
+            while(jR.hasNext()){
+                node = jR.nextName();
+
+                if(node.equals("mid")) mid = jR.nextString();
+                else if(node.equals("name")) name = jR.nextString();
+                else if(node.equals("score")) score = jR.nextDouble();
+                else if(node.equals("boundingPoly")){
+                    // Array koordinata
+                    map = parseKor(jR);
+                }
+            }
+            jR.endObject();
+
+            // TODO Return objekt - treba kretirati
+
+            return new PicObject(mid, name, score, map);
+
+        }
+
+        class myCanvas extends View{
+
+            private Rect r = null;
+
+            private Paint p;
+
+            private Bitmap bmp;
+
+            public myCanvas(Context context) {
+                super(context);
+                this.p = new Paint();
+                p.setTextSize(20.0f);
+                p.setColor(Color.BLUE);
+                p.setStrokeWidth(5.0f);
+                p.setStyle(Paint.Style.STROKE);
+                this.setBackgroundColor(Color.RED);
+
+            }
+
+            @Override
+            protected void onDraw(Canvas canvas) {
+                super.onDraw(canvas);
+                if(r!=null){
+                    canvas.drawRect(r, p);
+                }
+            }
+
+            public void setR(Rect r) {
+                this.r = r;
+            }
+
+            public void setBmp(Bitmap bmp) {
+                this.bmp = bmp;
+            }
+        }
+    }
+
+    class Task extends AsyncTask<Bitmap, Void, byte[]> {
+
+        @Override
+        protected void onPreExecute() {
+            super.onPreExecute();
+            ConstraintLayout constraintLayout = findViewById(R.id.con_layout);
+            constraintLayout.setVisibility(View.VISIBLE);
+            constraintLayout.setBackgroundColor(Color.argb(255,200,200,200));
+        }
+
+        @Override
+        protected byte[] doInBackground(Bitmap... bitmaps) {
+
+            // Get bitmap if not null
+
+            Bitmap bitmap;
+
+            if(bitmaps.length > 0){
+                bitmap = bitmaps[0];
+            }else{
+                bitmap = textureView.getBitmap();
+            }
+
+
+            // BITMAP
+
+            Bitmap bmp = BitmapFactory.decodeResource(getResources(), R.drawable.test2);
+
+            Bitmap bmp2 = Bitmap.createScaledBitmap(bmp, bmp.getWidth()/4, bmp.getHeight()/4, false);
+
+            ByteArrayOutputStream bt = new ByteArrayOutputStream();
+
+
+
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 100, bt);
+
+            byte[] bajtovi = bt.toByteArray();
+
+            Log.e("S1", String.valueOf(bmp.getByteCount()));
+            Log.e("S2", String.valueOf(bmp2.getByteCount()));
+
+            return bajtovi;
+        }
+
+        @Override
+        protected void onPostExecute(byte[] bajtovi) {
+            super.onPostExecute(bajtovi);
+
+            Bitmap bitmap = BitmapFactory.decodeByteArray(bajtovi,0, bajtovi.length);
+
+            ImageView imageView = findViewById(R.id.imageView);
+            imageView.setImageBitmap(bitmap);
+
+
+            String enc = Base64.encodeToString(bajtovi, Base64.DEFAULT);
+
+
+
+            ConstraintLayout layout = findViewById(R.id.con_layout);
+            FloatingActionButton button1 = findViewById(R.id.floatingActionButton);
+            FloatingActionButton button2 = findViewById(R.id.floatingActionButton2);
+
+            ProgressBar progressBar = findViewById(R.id.progressBar);
+            progressBar.setVisibility(View.GONE);
+
+
+
+            button1.show();
+
+            button1.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    //startMe(enc);
+
+                    Task2 t1 = new Task2();
+                    t1.execute(bitmap);
+
+
+                }
+            });
+
+            // TODO funkcija za slanje fotke
+
+            button2.show();
+
+
+            button2.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    button1.hide();
+                    button2.hide();
+                    progressBar.setVisibility(View.VISIBLE);
+                    layout.setVisibility(View.GONE);
+                    imageView.setImageBitmap(null);
+                }
+            });
+
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        Log.e("Zombie", String.valueOf(requestCode));
+
+        if(requestCode == PICK_IMAGE){
+            if(resultCode < 0){
+
+                Uri u = data.getData();
+                Log.e("Zombie", u.getPath());
+
+                Bitmap bmp = null;
 
                 try {
-                    cameraCaptureSession.stopRepeating();
-                    //cameraCaptureSession.capture(captureRequestBuilder.build(), null, backgroundHandler);
-                } catch (CameraAccessException e) {
+                    bmp = MediaStore.Images.Media.getBitmap(this.getContentResolver(), u);
+                } catch (IOException e) {
                     e.printStackTrace();
-                }*/
-
-               /* Bitmap bitmap = textureView.getBitmap();
-                ByteArrayOutputStream stream = new ByteArrayOutputStream();
-                bitmap.compress(Bitmap.CompressFormat.PNG, 80, stream);
-                byte[] bytes = stream.toByteArray();
-                String encoded = Base64.encodeToString(bytes, Base64.DEFAULT);
-/*
-                ImageView temp_img = new ImageView(MainActivity.this);
-                temp_img.setImageBitmap( bitmap);
-
-
-                FrameLayout relativeLayout = (FrameLayout) findViewById(R.id.content_frame);
-                FrameLayout.LayoutParams layoutParams = new FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-
-                );
-
-
-                relativeLayout.addView(temp_img, layoutParams);
-
-
-*/
-                /*
-                                                                 
-                fragment = new BlankFragment();
-                fragmentManager = getSupportFragmentManager();
-                FragmentTransaction fragmentTransaction = fragmentManager.beginTransaction();
-
-                fragmentTransaction.add(R.id.content_frame, fragment).commit();
-*/
+                }
 
                 Task tt = new Task();
-                tt.execute();
+                tt.execute(bmp);
 
-/*
-                ImageView imageView = new ImageView(v.getContext());
-
-                imageView.setScaleType(ImageView.ScaleType.FIT_XY);
-                imageView.setBackgroundColor(Color.argb(255,200,200,200));
-                imageView.setAdjustViewBounds(true);
-                imageView.setImageResource(R.drawable.wakeupcat);
-
-
-                FrameLayout layout = findViewById(R.id.content_frame);
-                layout.addView(imageView);
-
-                for(int index=0; index<((ViewGroup)layout).getChildCount(); ++index) {
-                    View nextChild = ((ViewGroup)layout).getChildAt(index);
-                    if(nextChild instanceof ImageView){
-                        layout.removeView(nextChild);
-                        break;
-                    }
-                }*/
-                //startMe(encoded)
             }
-        });
+
+
+        }
 
     }
-    
 
     @Override
     public void onBackPressed() {
@@ -1156,12 +1472,13 @@ public class MainActivity extends AppCompatActivity {
                         cameraManager.getCameraCharacteristics(cameraId);
 
                 if(cameraCharacteristics.get(CameraCharacteristics.LENS_FACING) == cameraFacing){
-                    StreamConfigurationMap streamConfigurationMap = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+                    streamConfigurationMap = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
                     previewSize = streamConfigurationMap.getOutputSizes(SurfaceTexture.class)[1];
 
                     for(Size s : streamConfigurationMap.getOutputSizes(SurfaceTexture.class)){
                         Log.d(TAG, s.toString());
                     }
+
 
                     this.cameraId = cameraId;
 
@@ -1182,7 +1499,7 @@ public class MainActivity extends AppCompatActivity {
 
                 if(cameraCharacteristics.get(CameraCharacteristics.LENS_FACING) == cameraFacing){
                     StreamConfigurationMap streamConfigurationMap = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-                    previewSize = streamConfigurationMap.getOutputSizes(SurfaceTexture.class)[2];
+                    previewSize = streamConfigurationMap.getOutputSizes(SurfaceTexture.class)[0];
 
                     for(Size s : streamConfigurationMap.getOutputSizes(SurfaceTexture.class)){
                         Log.d(TAG, s.toString());

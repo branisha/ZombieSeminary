@@ -2,23 +2,10 @@
 <menu xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <group android:checkableBehavior="single">
-        <item
-            android:id="@+id/nav_camera"
-            android:icon="@drawable/ic_launcher_background"
-            android:title="res0" />
-        <item
-            android:id="@+id/nav_gallery"
-            android:icon="@drawable/ic_launcher_background"
-            android:title="res1" />
-        <item
-            android:id="@+id/nav_slideshow"
-            android:icon="@drawable/ic_launcher_background"
-            android:title="res2" />
-        <item
-            android:id="@+id/nav_manage"
-            android:icon="@drawable/ic_launcher_background"
-            android:title="res3" />
+    <group
+        android:checkableBehavior="single"
+        android:id="@+id/group_res" >
+
     </group>
 
 </menu>
