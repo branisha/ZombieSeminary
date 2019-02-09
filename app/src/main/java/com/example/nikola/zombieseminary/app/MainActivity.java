@@ -457,7 +457,8 @@ public class MainActivity extends AppCompatActivity {
 
 
                 // stvaranje endpointa sa keyom
-                URL mojEndpoint = new URL("https://vision.googleapis.com/v1/images:annotate?key=AIzaSyBzNFlNI_G6ROs2L1lLaQYYbg0U1sDwE2w");
+                String mojKey = "Super secret key";
+                URL mojEndpoint = new URL("https://vision.googleapis.com/v1/images:annotate?key=" + mojKey);
                 // otvaranje veze
                 HttpsURLConnection myConnection =
                         (HttpsURLConnection) mojEndpoint.openConnection();
